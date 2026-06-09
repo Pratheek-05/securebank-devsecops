@@ -1,0 +1,39 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "securebank.fullname" . }}
+  labels:
+    app: {{ include "securebank.name" . }}
+    chart: {{ include "securebank.chart" . }}
+    release: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ include "securebank.name" . }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 5000
+          protocol: TCP
+      from:
+        # Allow traffic from within the namespace
+        - podSelector: {}
+        # Allow traffic from Prometheus for metrics scraping
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+  egress:
+    - ports:
+        # DNS
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - ports:
+        # HTTPS (AWS APIs, external services)
+        - port: 443
+          protocol: TCP
+{{- end }}

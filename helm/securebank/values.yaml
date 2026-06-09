@@ -1,0 +1,62 @@
+replicaCount: 2
+
+image:
+  repository: "028417007027.dkr.ecr.us-east-1.amazonaws.com/securebank"
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 5000
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+securityContext:
+  enabled: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+topologySpreadConstraints:
+  enabled: true
+
+env:
+  - name: FLASK_ENV
+    value: production
+  - name: LOG_LEVEL
+    value: INFO
+
+# ── Autoscaling ──────────────────────────────────────────
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# ── Network Policy ───────────────────────────────────────
+networkPolicy:
+  enabled: true
+
+# ── Service Account ──────────────────────────────────────
+serviceAccount:
+  annotations: {}
+  # For IRSA (IAM Roles for Service Accounts):
+  # annotations:
+  #   eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/securebank-app-role
+  automountToken: false
+
+# ── Pod Disruption Budget ────────────────────────────────
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

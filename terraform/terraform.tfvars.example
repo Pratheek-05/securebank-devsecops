@@ -1,0 +1,12 @@
+aws_region            = "us-east-1"
+name_prefix           = "securebank"
+environment           = "production"
+cluster_name          = "securebank-cluster"
+ecr_repository_name   = "securebank"
+vpc_cidr              = "10.0.0.0/16"
+public_subnet_cidrs   = ["10.0.1.0/24", "10.0.2.0/24"]
+private_subnet_cidrs  = ["10.0.10.0/24", "10.0.11.0/24"]
+public_access_cidrs   = ["0.0.0.0/0"] # Restrict to your office/VPN CIDR in production
+node_desired_capacity = 2
+node_max_size         = 4
+node_min_size         = 2

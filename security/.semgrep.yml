@@ -1,0 +1,67 @@
+rules:
+  - id: securebank-flask-no-hardcoded-secrets
+    pattern-either:
+      - pattern: "password = \"...\""
+      - pattern: "secret = \"...\""
+      - pattern: "api_key = \"...\""
+      - pattern: "token = \"...\""
+      - pattern: 'SECRET_KEY = "..."'
+    message: >
+      Avoid hardcoded credentials in source code.
+      Use AWS Secrets Manager or environment variables instead.
+    languages:
+      - python
+    severity: WARNING
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      category: security
+
+  - id: securebank-no-shell-injection
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(...)
+          - pattern: subprocess.call(...)
+          - pattern: subprocess.Popen(...)
+          - pattern: os.system(...)
+      - pattern-not: subprocess.run(["..."], ...)
+    message: >
+      Avoid using shell commands with unsanitized inputs.
+      Use parameterized commands with shell=False (list form) to prevent command injection.
+    languages:
+      - python
+    severity: ERROR
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+      category: security
+
+  - id: securebank-no-debug-mode
+    pattern: app.run(..., debug=True, ...)
+    message: >
+      Do not enable Flask debug mode in production.
+      Debug mode exposes the interactive debugger and allows arbitrary code execution.
+    languages:
+      - python
+    severity: ERROR
+    metadata:
+      cwe: "CWE-215: Insertion of Sensitive Information Into Debugging Code"
+      category: security
+
+  - id: securebank-no-sql-string-format
+    pattern-either:
+      - pattern: |
+          $QUERY = f"...{$VAR}..."
+          ...
+          $CURSOR.execute($QUERY)
+      - pattern: |
+          $QUERY = "..." % $VAR
+          ...
+          $CURSOR.execute($QUERY)
+    message: >
+      Avoid string formatting in SQL queries to prevent SQL injection.
+      Use parameterized queries instead.
+    languages:
+      - python
+    severity: ERROR
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+      category: security

@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.git
+*.gitignore
+.gitlab-ci.yml
+.github
+terraform
+helm
+argocd
+monitoring
+security
+README.md

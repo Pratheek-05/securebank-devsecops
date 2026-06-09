@@ -1,0 +1,238 @@
+name: SecureBank CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Prevent concurrent deployments to production
+concurrency:
+  group: securebank-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+  actions: read
+
+env:
+  AWS_REGION: us-east-1
+  IMAGE_NAME: securebank
+  ECR_REPOSITORY: 028417007027.dkr.ecr.us-east-1.amazonaws.com/securebank
+
+jobs:
+  # ──────────────────────────────────────────────
+  # Stage 1: Unit Tests
+  # ──────────────────────────────────────────────
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        working-directory: application
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run tests
+        working-directory: application
+        run: python -m pytest tests/ -v --tb=short
+
+  # ──────────────────────────────────────────────
+  # Stage 2: Security Scans (SAST)
+  # ──────────────────────────────────────────────
+  semgrep:
+    name: Semgrep SAST scan
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: returntocorp/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
+        with:
+          config: security/.semgrep.yml
+
+  trivy-filesystem:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: filesystem
+          scan-ref: .
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Run Trivy filesystem scan (SARIF)
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: filesystem
+          scan-ref: .
+          format: sarif
+          output: trivy-fs-results.sarif
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: trivy-filesystem
+
+  # ──────────────────────────────────────────────
+  # Stage 3: Docker Build & Container Scan
+  # ──────────────────────────────────────────────
+  build-and-scan:
+    name: Docker build and container scan
+    runs-on: ubuntu-latest
+    needs: [semgrep, trivy-filesystem]
+    outputs:
+      image_tag: ${{ steps.meta.outputs.sha_tag }}
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          SHA_TAG="${{ github.sha }}"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          echo "Image will be tagged: ${SHA_TAG}"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories --repository-names securebank 2>/dev/null || \
+            aws ecr create-repository \
+              --repository-name securebank \
+              --image-tag-mutability IMMUTABLE \
+              --image-scanning-configuration scanOnPush=true
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            -t ${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.sha_tag }} \
+            -t ${{ env.ECR_REPOSITORY }}:latest \
+            application/
+
+      - name: Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: image
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.sha_tag }}
+          format: table
+          exit-code: 1
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Trivy container scan (SARIF)
+        if: always()
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: image
+          image-ref: ${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.sha_tag }}
+          format: sarif
+          output: trivy-image-results.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Upload SARIF to GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-image-results.sarif
+          category: trivy-container
+
+      - name: Push image to ECR
+        run: |
+          docker push ${{ env.ECR_REPOSITORY }}:${{ steps.meta.outputs.sha_tag }}
+          docker push ${{ env.ECR_REPOSITORY }}:latest
+
+  # ──────────────────────────────────────────────
+  # Stage 4: Terraform Plan
+  # ──────────────────────────────────────────────
+  terraform-plan:
+    name: Terraform plan
+    runs-on: ubuntu-latest
+    needs: build-and-scan
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36 # v3.0.0
+        with:
+          terraform_version: 1.5.0
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+      - name: Terraform plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan
+      - name: Upload Terraform plan
+        uses: actions/upload-artifact@65462800fd760344b1a7b4382951275a0abb4808 # v4.3.3
+        with:
+          name: tfplan
+          path: terraform/tfplan
+          retention-days: 5
+
+  # ──────────────────────────────────────────────
+  # Stage 5: Terraform Apply (main branch only)
+  # ──────────────────────────────────────────────
+  terraform-apply:
+    name: Terraform apply
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      - uses: hashicorp/setup-terraform@a1502cd9e758c50496cc9ac5308c4843bcd56d36 # v3.0.0
+        with:
+          terraform_version: 1.5.0
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+      - name: Download Terraform plan
+        uses: actions/download-artifact@9c19ed7fe5d278cd354c7dfd5d3b88589c7e2395 # v4.1.6
+        with:
+          name: tfplan
+          path: terraform/
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init
+      - name: Terraform apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan

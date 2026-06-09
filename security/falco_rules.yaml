@@ -1,0 +1,38 @@
+- rule: SecureBank shell spawned in container
+  desc: Detect shell spawned inside the SecureBank application container
+  condition: >
+    spawned_process and container and
+    container.image.repository contains "securebank" and
+    proc.name in (bash, sh, dash, ash, zsh)
+  output: >
+    Shell spawned in SecureBank container
+    (user=%user.name command=%proc.cmdline container=%container.name
+     image=%container.image.repository:%container.image.tag)
+  priority: WARNING
+  tags: [process, securebank, mitre_execution]
+
+- rule: SecureBank unexpected outbound connection
+  desc: Detect unexpected outbound network connections from SecureBank containers
+  condition: >
+    outbound and container and
+    container.image.repository contains "securebank" and
+    not (fd.sport in (5000, 53, 443))
+  output: >
+    Unexpected outbound connection from SecureBank container
+    (user=%user.name command=%proc.cmdline connection=%fd.name
+     container=%container.name image=%container.image.repository)
+  priority: NOTICE
+  tags: [network, securebank, mitre_exfiltration]
+
+- rule: SecureBank sensitive file access
+  desc: Detect reads of sensitive files inside SecureBank containers
+  condition: >
+    open_read and container and
+    container.image.repository contains "securebank" and
+    fd.name startswith /etc/shadow
+  output: >
+    Sensitive file read in SecureBank container
+    (user=%user.name file=%fd.name command=%proc.cmdline
+     container=%container.name)
+  priority: WARNING
+  tags: [filesystem, securebank, mitre_credential_access]

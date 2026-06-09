@@ -1,0 +1,9 @@
+apiVersion: 1
+providers:
+  - name: "SecureBank"
+    orgId: 1
+    folder: "SecureBank"
+    type: file
+    disableDelete: false
+    options:
+      path: /etc/grafana/provisioning/dashboards

@@ -1,0 +1,78 @@
+groups:
+  - name: securebank-alerts
+    rules:
+      # ── Availability ───────────────────────────────────────
+      - alert: SecureBankDown
+        expr: up{job="securebank"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SecureBank is down"
+          description: "SecureBank target {{ $labels.instance }} has been unreachable for more than 1 minute."
+
+      # ── Error Rate ─────────────────────────────────────────
+      - alert: SecureBankHighErrorRate
+        expr: |
+          (
+            sum(rate(securebank_http_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(securebank_http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate on SecureBank"
+          description: "More than 5% of requests are returning 5xx errors over the last 5 minutes. Current rate: {{ $value | humanizePercentage }}."
+
+      # ── Latency ────────────────────────────────────────────
+      - alert: SecureBankHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(securebank_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency on SecureBank"
+          description: "95th percentile latency is above 1 second. Current p95: {{ $value | humanizeDuration }}."
+
+      # ── Pod Restarts ───────────────────────────────────────
+      - alert: SecureBankPodRestarting
+        expr: increase(kube_pod_container_status_restarts_total{container="securebank"}[1h]) > 3
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SecureBank pod is restarting frequently"
+          description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last hour."
+
+      # ── CPU Throttling ────────────────────────────────────
+      - alert: SecureBankCPUThrottling
+        expr: |
+          sum(increase(container_cpu_cfs_throttled_periods_total{container="securebank"}[5m]))
+          /
+          sum(increase(container_cpu_cfs_periods_total{container="securebank"}[5m]))
+          > 0.25
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SecureBank is experiencing CPU throttling"
+          description: "More than 25% of CPU periods are being throttled. Consider increasing CPU limits."
+
+      # ── Memory Usage ──────────────────────────────────────
+      - alert: SecureBankHighMemoryUsage
+        expr: |
+          container_memory_working_set_bytes{container="securebank"}
+          /
+          container_spec_memory_limit_bytes{container="securebank"}
+          > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SecureBank memory usage is high"
+          description: "Memory usage is above 85% of the limit. Pod {{ $labels.pod }} is at {{ $value | humanizePercentage }}."
