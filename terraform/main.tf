@@ -65,56 +65,7 @@ module "secrets" {
   environment = var.environment
 }
 
-# ── ECR ──────────────────────────────────────────────────
-resource "aws_ecr_repository" "securebank" {
-  name                 = var.ecr_repository_name
-  image_tag_mutability = "IMMUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  encryption_configuration {
-    encryption_type = "AES256"
-  }
-
-  tags = {
-    Name        = var.ecr_repository_name
-    Environment = var.environment
-  }
-}
-
-resource "aws_ecr_lifecycle_policy" "securebank" {
-  repository = aws_ecr_repository.securebank.name
-
-  policy = jsonencode({
-    rules = [
-      {
-        rulePriority = 1
-        description  = "Expire untagged images after 30 days"
-        selection = {
-          tagStatus   = "untagged"
-          countType   = "sinceImagePushed"
-          countUnit   = "days"
-          countNumber = 30
-        }
-        action = {
-          type = "expire"
-        }
-      },
-      {
-        rulePriority = 2
-        description  = "Keep only the last 50 tagged images"
-        selection = {
-          tagStatus   = "tagged"
-          tagPrefixList = ["sha-"]
-          countType   = "imageCountMoreThan"
-          countNumber = 50
-        }
-        action = {
-          type = "expire"
-        }
-      }
-    ]
-  })
+# ── ECR (managed by CI pipeline, referenced here) ───────
+data "aws_ecr_repository" "securebank" {
+  name = var.ecr_repository_name
 }

@@ -26,7 +26,7 @@ output "node_role_arn" {
 
 output "ecr_repository_url" {
   description = "Amazon ECR repository URL"
-  value       = aws_ecr_repository.securebank.repository_url
+  value       = data.aws_ecr_repository.securebank.repository_url
 }
 
 output "secret_arn" {
