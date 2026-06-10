@@ -14,8 +14,12 @@ LABEL org.opencontainers.image.title="SecureBank" \
       org.opencontainers.image.vendor="SecureBank" \
       org.opencontainers.image.source="https://github.com/Pratheek-05/securebank-devsecops"
 
-# Create non-root user
-RUN groupadd --gid 1000 appuser && \
+# Patch OS-level vulnerabilities and create non-root user
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    groupadd --gid 1000 appuser && \
     useradd --uid 1000 --gid appuser --shell /bin/false --create-home appuser
 
 WORKDIR /app
